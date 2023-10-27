@@ -1,0 +1,317 @@
+---
+title: "moment3"
+output: pdf_document
+date: "2023-10-24"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load data and library
+```{r data}
+data_train <- read.csv("data-train.csv")
+library(MASS)
+library(ISLR)
+library(dplyr)
+library(glmnet)
+library(boot)
+```
+
+## EDA:
+```{r}
+summary(data_train$R_moment_3)
+```
+
+
+## Variable Transformations:
+-- See Emi's report
+```{r log-transform-m3}
+log_m3 = log(data_train$R_moment_3)
+hist(log_m3, main="Histogram of log(R_moment_3)", xlab="log(R_moment_3)")
+```
+
+```{r log-transform-St}
+log_St = log(data_train$St)
+hist(log_St, main="Histogram of log(St)", xlab="log(St)")
+```
+
+
+## Mutating dataframe:
+```{r add-logm3-to-datatrain}
+data_train = data_train %>%
+  mutate(log_m3 = log_m3)
+```
+
+```{r add-logSt-to-datatrain}
+data_train = data_train %>%
+  mutate(log_St = log_St)
+```
+
+
+### Convert Fr into classes:
+```{r Fr-categorize}
+data_train = data_train %>%
+  mutate(Fr_cat = case_when(
+    is.infinite(Fr) ~ "supercritical", Fr < 1 ~ "subcritical", Fr == 1 ~ "unity", Fr > 1 ~ "supercritical", TRUE ~ NA_character_)) %>%
+  mutate(Fr_cat = as.factor(Fr_cat))
+```
+
+
+## Explore predictor-response relationships:
+```{r predictor-response}
+par(mfrow=c(3,2))
+plot(log_St, log_m3)
+plot(data_train$Re, log_m3)
+plot(data_train$Fr_cat, log_m3)
+```
+
+
+
+## Explore interactions:
+```{r interactions}
+interaction.plot(x.factor = data_train$St, trace.factor = data_train$Re, response = log_m3)
+interaction.plot(x.factor = data_train$St, trace.factor = data_train$Fr_cat, response = log_m3)
+interaction.plot(x.factor = data_train$Re, trace.factor = data_train$Fr_cat, response = log_m3)
+```
+
+## MLR
+
+### 1. log_St+Re+Fr_cat --> $R^2$: 0.461
+```{r log_St+Re+Fr_cat}
+lm.fit.all <- lm(log_m3~log_St+Re+Fr_cat, data=data_train)
+summary(lm.fit.all)
+par(mfrow=c(2,2))
+plot(lm.fit.all)
+```
+### 2. St+Re+Fr_cat --> $R^2$: 0.4265
+```{r St+Re+Fr_cat}
+lm.fit.St <- lm(log_m3~St+Re+Fr_cat, data=data_train)
+summary(lm.fit.St)
+par(mfrow=c(2,2))
+plot(lm.fit.St)
+```
+
+## Interaction Terms
+
+### 1. all three main and interactions --> $R^2$: 0.5158
+```{r all-main-and-interactions}
+lm.fit.interactions.all <- lm(log_m3~log_St*Re + Re*Fr_cat + log_St*Fr_cat, data=data_train)
+summary(lm.fit.interactions.all)
+par(mfrow=c(2,2))
+plot(lm.fit.interactions.all)
+```
+
+### 2. only significant terms: Re*Fr_cat --> $R^2$: 0.4702
+```{r Re*Fr_cat}
+lm.fit.only.sig <- lm(log_m3~Re + Fr_cat + Re:Fr_cat, data=data_train)
+summary(lm.fit.only.sig)
+par(mfrow=c(2,2))
+plot(lm.fit.only.sig)
+```
+
+### 3. significants and St: log_St+Re*Fr_cat --> $R^2$: 0.5262
+```{r log_St+Re*Fr_cat}
+lm.fit.sig.and.logSt <- lm(log_m3~log_St + Re*Fr_cat, data=data_train)
+summary(lm.fit.sig.and.logSt)
+#par(mfrow=c(2,2))
+plot(lm.fit.sig.and.logSt)
+```
+
+### 4. significants, St main, and St:Re: Re*Fr_cat+log_St+log_St:Re --> $R^2$: 0.521
+```{r Re*Fr_cat+log_St*Re}
+lm.fit.sig.logSt.and.StRe <- lm(log_m3~Re*Fr_cat + log_St*Re, data=data_train)
+summary(lm.fit.sig.logSt.and.StRe)
+par(mfrow=c(2,2))
+plot(lm.fit.sig.logSt.and.StRe)
+```
+
+
+### 5. significants, St main, and St:Fr: Re*Fr_cat+log_St+log_St:Fr_cat --> $R^2$: 0.5212
+```{r Re*Fr_cat+log_St*Fr_cat}
+lm.fit.sig.logStFr <- lm(log_m3~Re*Fr_cat + log_St*Fr_cat, data=data_train)
+summary(lm.fit.sig.logStFr)
+par(mfrow=c(2,2))
+plot(lm.fit.sig.logStFr)
+```
+
+### Conclusions for Interaction Terms:
+Upon exploring different combinations of interaction terms, I think the third model under interactions has the best predictive performance: significants and St: log_St+Re*Fr_cat. This seems intuitively correct because it makes sense to have interactions between the gravitational acceleration (Fr) and the degree of turbulence (Re). Also, from prior interaction plot explorations, we can see that Fr and Re closely follow each other in their trajectory.
+
+
+# Moving on to nonlinear models
+
+## Polynomial
+
+1. log_m3 ~ poly(log(St), 3)+Re+Fr_cat, $R^2$ = 0.4814
+```{r polynomial}
+fitpoly=lm(log_m3 ~ poly(log_St, 3)+Re+Fr_cat, data=data_train)
+coef(summary(fitpoly))
+summary(fitpoly)
+plot(fitpoly)
+```
+
+2. log_m3 ~ poly(log(St), 3)+Re*Fr_cat, $R^2$ = 0.5478
+```{r polynomial-interact}
+fitpoly.interact=lm(log_m3 ~ poly(log_St, 3)+Re*Fr_cat, data=data_train)
+coef(summary(fitpoly.interact))
+summary(fitpoly.interact)
+plot(fitpoly.interact)
+```
+
+3. log_m3 ~ poly(log(St), 3)+Re*Fr_cat+log(St):Fr_cat, $R^2$ = 0.5454
+```{r polynomial-interact2}
+fitpoly.interact2=lm(log_m3 ~ poly(log_St, 3)+Re*Fr_cat+log(St):Fr_cat, data=data_train)
+coef(summary(fitpoly.interact2))
+summary(fitpoly.interact2)
+plot(fitpoly.interact2)
+```
+
+
+## Cross Validation to Select Model:
+```{r models}
+mlr=glm(log_m3~log_St + Re*Fr_cat, data=data_train)
+poly=glm(log_m3~poly(log_St, 3)+Re*Fr_cat, data=data_train)
+```
+
+```{r loocv-mlr}
+set.seed(1)
+cv.err=cv.glm(data_train, mlr)
+cat("MLR:", cv.err$delta[1])
+```
+
+```{r loocv-poly}
+set.seed(1)
+cv.err=cv.glm(data_train, poly)
+cat("poly:", cv.err$delta[1])
+```
+
+```{r cv-mlr}
+set.seed(1)
+cv.error.10=rep(0 ,10)
+for (i in 1:10){
+  cv.error.10[i]=cv.glm(data_train, mlr, K=10)$delta[1]}
+cv.error.10
+summary(cv.error.10)
+```
+
+```{r cv-poly}
+set.seed(1)
+cv.error.10=rep(0 ,10)
+for (i in 1:10){
+  cv.error.10[i]=cv.glm(data_train, poly, K=10)$delta[1]}
+cv.error.10
+summary(cv.error.10)
+```
+
+
+## Ridge Regression
+
+```{r create-matrix-and-grid}
+x = model.matrix(log_m3~log_St*Re + log_St*Fr_cat + Re*Fr_cat, data_train)[,-1]
+y = log_m3
+grid = 10^seq(10,-2, length=100)
+```
+
+```{r train-test-split}
+set.seed(1)
+train=sample(1: nrow(x), nrow(x)/2)
+test=(-train)
+y.test=y[test]
+```
+
+```{r ridge-regression}
+ridge.mod = glmnet(x[train,], y[train], alpha=0, lambda=grid, thresh =1e-12)
+ridge.pred=predict(ridge.mod, s=0, newx=x[test ,])
+mean((ridge.pred-y.test)^2)
+```
+
+- lambda = 0, test MSE is 17.26092
+
+```{r cv-choose-lambda}
+set.seed(1)
+cv.out=cv.glmnet(x[train,],y[train],alpha=0)
+plot(cv.out)
+bestlam=cv.out$lambda.min
+bestlam
+```
+
+```{r ridge-using-bestlam}
+ridge.pred=predict(ridge.mod, s=bestlam, newx=x[test,])
+mean((ridge.pred-y.test)^2)
+```
+
+
+```{r refit-ridge-on-fulldata}
+out=glmnet(x,y,alpha=0)
+predict(out, type="coefficients", s=bestlam)
+```
+
+### Conclusions on Ridge Regression:
+- bestlambda = 0.684 with test MSE = 17.1659
+- None of the coefficients go to zero, as expected
+- using bestlambda led to an improvement from least squares fitting
+
+
+
+## Lasso
+```{r lasso}
+lasso.mod=glmnet(x[train,], y[train], alpha=1, lambda=grid)
+plot(lasso.mod)
+```
+
+```{r cv-for-testerror}
+set.seed(1)
+cv.out=cv.glmnet(x[train,], y[train], alpha=1)
+plot(cv.out)
+bestlamlas=cv.out$lambda.min
+print(bestlamlas)
+lasso.pred=predict(lasso.mod, s=bestlamlas, newx=x[test,])
+mean((lasso.pred-y.test)^2)
+```
+
+
+```{r coef}
+out=glmnet(x,y,alpha=1, lambda=grid)
+lasso.coef=predict(out, type="coefficients", s= bestlamlas)
+lasso.coef
+```
+
+### Conclusions on Lasso:
+- bestlambda = 0.004004612 with test MSE = 17.1717
+- Lasso showed that interaction term `log_St:Re` is insignificant
+
+
+
+# Moment of Truth:
+
+### Preparing test data:
+```{r load-test}
+data_test <- read.csv("data-test.csv")
+head(data_test)
+```
+
+```{r log-transform}
+log_St = log(data_test$St)
+data_test = data_test %>%
+  mutate(log_St = log_St)
+```
+
+```{r categorize-Fr}
+data_test = data_test %>%
+  mutate(Fr_cat = case_when(
+    is.infinite(Fr) ~ "supercritical", Fr < 1 ~ "subcritical", Fr == 1 ~ "unity", Fr > 1 ~ "supercritical", TRUE ~ NA_character_)) %>%
+  mutate(Fr_cat = as.factor(Fr_cat))
+```
+
+### Predict:
+```{r predict-on-poly}
+poly=glm(log_m3~poly(log_St, 3)+Re*Fr_cat, data=data_train)
+m3_predictions = predict(poly, newdata = data_test)
+exp_m3 = exp(m3_predictions)
+summary(exp_m3)
+exp_m3
+```
+
+
+
